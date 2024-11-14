@@ -1,0 +1,186 @@
+---
+title: "TITLE OF REPORT YO"
+author: "AUTHOR"
+date: "DATE OF REPORT e.g., 2024-10-16"
+output:
+  word_document: default
+  html_document:
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(lidR)
+library(terra)
+library(ggplot2)
+library(tidyterra)
+library(tidyverse)
+library(sf)
+library(vtable)
+library(flextable)
+
+# ----> Setup. Supply the appropriate info here, and the rest should be automatic.
+
+setwd(".")
+
+# Name of the property where the data were collected
+PropertyName = "State Forest ASCC sites"
+
+# Data: CHM, ttops, boundaries, and orthomosaic
+chm = rast("Products/Raster/chm.tif")
+ttops = st_read("Products/Vector/ttops_c.gpkg")
+bounds = st_read("Products/Vector/bounds.gpkg")
+ortho = rast("Products/Terra_output/Images/ortho.tif") # use "rast(PATH)" if you have an ortho, "NULL" if not.
+
+# ---> Some calculations and constants
+areas = st_area(bounds)
+min_area = round(min(areas)/4046.86) # acres
+max_area = round(max(areas)/4046.86) # acres
+
+GSD = 5.39 # maximum ground sampling distance for flight
+flight_speed = 5.9 # flight speed for mission
+
+competition = FALSE # include competition summary in the report?
+groups = "Sale_Name" # Column in ttops that has management unit labels.
+```
+
+### Introduction
+
+The Colorado State Forest Service conducted a forest survey and mapping mission at `r PropertyName`, in Boulder County on September 24, 2024. We were hosted by Foresters in the State Forest field office. The CSFS GIS team hoped to refine protocols for drone data collection and to develop data products useful to the forestry services division. This report details our data collection strategy and showcases data products produced from imagery collected at `r PropertyName`.
+
+### Methods
+
+We collected data at five management units that ranged in area from `r min_area` to `r max_area` acres (Figure 1). Because unit shapes and boundaries between units were complex, we created a single flight plan for the entire property. We used a DJI Mavic 3 multispectral drone and the DJI Pilot 2 app to collect RGB color and narrow-band green, red, red-edge, and near-infrared imagery. We enabled the terrain following feature in DJI Pilot 2 and set the flight altitude to 385 feet above the ground, which resulted in a maximum ground sampling distances of `r GSD` cm/pixel for RGB and narrow-band images, respectively. However, we were unable to get the Mavic 3 drone to fly with terrain following enabled. We later learned that we needed to set the maximum flight altitude higher than the maximum height above the launch point the drone would fly during the mission. We flew the mission without terrain following enabled which slightly increased the ground sampling distance. We set picture overlap to 90% front to back and 85% side to side, and set flight speed to the maximum we were allowed by the flight software (`r flight_speed` mph). The flight software limits the maximum flight speed to prevent motion blur in the pictures.
+  
+```{r Figure 1, echo=FALSE, fig.cap=paste0("Figure 1. Management area at ",PropertyName,", Colorado.")}
+knitr::include_graphics("Planning/ProjectArea.png")
+```
+  
+### Processing & Products
+
+True color images (RGB) were processed using the 3D maps pipeline in Pix4dCloud with all options at their default values. This yielded an orthomosaic and point cloud for the management area (Figure 2; I've zoomed in to a smaller area of the point cloud to show detail).
+
+```{r orthomap, echo=FALSE, warning=FALSE, message=FALSE, results='hide', cache=TRUE, fig.cap=paste0("Figure 2. Orthomosaic of ",PropertyName,".")}
+
+# ---> crop the rasters to the project boundary with a little buffer
+bounds = bounds %>% st_transform(crs = st_crs(ortho))
+bound_buf = bounds %>% st_union() %>% st_buffer(dist= 20)
+ortho = crop(x=ortho, y=vect(bound_buf), mask=T)
+
+
+# plot it
+plotRGB(ortho)
+```
+
+```{r OrthoZoom, echo=FALSE, fig.cap="Figure 3. Animated point cloud of a small part of the management area. The point cloud is a product of initial processing with DJI Terra."}
+knitr::include_graphics("Products/Animation/spinCloseUp.gif")
+```
+
+While products from initial processing are useful for illustrative purposes, we hoped to measure landscape, forest, and tree metrics from drone imagery. We therefore further processed point clouds using R packages lidR and cloud2trees. Algorithms in these packages allowed us to differentiate points that represent vegetation from those that represent ground, and create digital surface, terrain, slope, and aspect models (Figure 4).  
+  
+```{r Figure 4, echo=FALSE, fig.cap=paste0("Figure 4. From top left to bottom right, digital surface (DSM), digital terrain (DTM/DEM), slope, and aspect models from drone imagery collected at ",PropertyName,".")}
+knitr::include_graphics("Products/Graphs/heightProducts.png")
+```
+  
+
+By subtracting the digital terrain model from the digital surface model, we created a canopy height model (CHM). This flattened the terrain and gave us a much better representation of vegetation height in the forest (Figure 5). This also allowed us to make some basic canopy height measurements (Table 1).  
+  
+```{r Figure 5, echo=FALSE, fig.cap=paste0("Figure 5. Canopy height model (CHM) near ",PropertyName,". Lighter colors indicate taller vegetation.")}
+knitr::include_graphics("Products/Graphs/wholeCHM.png")
+```
+  
+<br>
+
+```{r summary table, echo=FALSE, cache=TRUE}
+
+tbl = sumtable(as.data.frame(chm$chm), summ=c("min(x)","pctile(x)[25]","median(x)","mean(x)","pctile(x)[75]","max(x)"),
+         out="return",
+         summ.names=c("Min.","1st Qu.","Med.","Mean","3rd Qu.","Max."), 
+         labels=c("height (m)"), title="")
+
+ft = flextable(tbl) %>% 
+  autofit() %>% 
+  theme_zebra() %>% 
+  set_caption("Table 1. Descriptive statistics of the height values of raster cells with height > 2 m at Pinecliffe.")
+
+ft
+```
+```{r tpa, echo=FALSE, results='hide', warning=FALSE, cache=TRUE}
+ttops = st_intersection(ttops, bounds)
+tpa = as.character(round(nrow(ttops)/(bounds %>% st_union() %>% st_area()/4046.856)))
+```
+Although we do get some information about vegetation height, these statistics can be misleading. They are statistics of the canopy height and take every cell into account whether it represents the top of a tree or not. We are likely more interested in the heights of individual trees. The lidR and cloud2trees packages in R include algorithms that identify individual trees from point clouds. We used one of those algorithms to identify trees and create a tree map in which each point represents the location of a tree (Figure 6). Additionally, tree locations allow us to calculate mean tree density in the unit: `r tpa` trees/acre.
+
+```{r, echo=FALSE}
+knitr::knit_hooks$set(crop=knitr::hook_pdfcrop)
+```
+```{r treemap, echo=FALSE, warning=FALSE, cache=TRUE, fig.dim=c(8,5), fig.cap="Figure 6. Tree map created from trees identified from point clouds. Each point represents the location of a tree. I’ve omitted pixels with heights < 2m to make it easier to see."}
+#| crop: true
+xMean = mean(c(xmin(chm),xmax(chm)))
+yMean = mean(c(ymin(chm),ymax(chm)))
+extent = ext(xMean-150,xMean+150,yMean,yMean+150)
+ttops_zoom = st_crop(ttops, extent)
+chm_zoom = crop(chm, extent)
+
+
+plot(chm_zoom)
+plot(ttops_zoom['tree_height_m'], add=TRUE, pch=20, cex=0.5, col="black")
+```
+  
+<br>
+The algorithm that identifies trees also provides information on the height and crown area of each tree identified (Table 2). Now that we’re only considering tree height, we see higher mean and median tree heights. That’s to be expected because we’re not taking heights from raster cells that don’t represent tree-tops into account. We can also make maps of tree crown area (Figure 7) and areas of continuous tree canopy (Figure 8).
+  
+<br>
+  
+```{r table 2, echo=FALSE, warning=FALSE, cache=TRUE}
+
+if(competition) {
+  vars=c("tree_height_m","dbh_cm","crown_area_m2","comp_dist_to_nearest_m")
+  labels = c("tree height (m)","dbh (cm)","crown area (m^2)","nearest neighbor (m)")
+}else{
+  vars=c("tree_height_m","dbh_cm","crown_area_m2")
+  labels = c("tree height (m)","dbh (cm)","crown area (m^2)")
+}
+
+tbl2 = sumtable(ttops, vars=vars,
+                summ=c("min(x)","pctile(x)[25]","median(x)","mean(x)","pctile(x)[75]","max(x)"),
+                summ.names=c("Min.","1st Qu.","Med.","Mean","3rd Qu.","Max."),
+                group = groups, group.long = T,
+                labels = labels, 
+                out="return")
+
+ft = flextable(tbl2) %>% 
+  autofit() %>% 
+  theme_zebra() %>% 
+  set_caption(paste0("Table 2. Descriptive statistics of trees measured using photogrammetric point clouds at ",PropertyName,"."))
+
+ft
+```
+```{r Figure 7, echo=FALSE, fig.cap="Figure 7. Tree crown area for trees > 2m tall."}
+knitr::include_graphics("Products/Graphs/crownArea.png")
+```
+  
+<br>
+
+```{r Figure 8, echo=FALSE, fig.cap="Figure 8. Continuous canopy area for trees > 2m tall."}
+knitr::include_graphics("Products/Graphs/clumpArea.png")
+```
+  
+<br>   
+
+By calculating the ratio of points > 2m above the ground to the total number of points for each cell in a raster, we can also create canopy density maps (Figure 9). 
+  
+```{r Figure 9, echo=FALSE, fig.cap="Figure 9. Canopy density map calculated as the ratio of points > 2 m above ground all points in a raster cell. Higher values indicate denser vegetation obscuring more of the ground."}
+knitr::include_graphics("Products/Graphs/wholeVD.png")
+```
+  
+<br>
+   
+We can also simulate some basic thinning strategies based on tree size (Figure 10).
+  
+```{r Figure 10, echo=FALSE, fig.cap=paste0("Figure 10. Virtual thinning at ",PropertyName,". From top left to bottom right: current conditions; removal of all trees taller than 15m; removal of all trees shorter than 15m; and removal of 70% of all trees regardless of height.")}
+knitr::include_graphics("Products/Graphs/clumpArea.png")
+```
+
+   
+   

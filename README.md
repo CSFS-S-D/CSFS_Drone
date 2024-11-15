@@ -5,3 +5,7 @@ This script came about because getting corrected coordinates for GCPs collected 
 StandarLayers takes point cloud products from initial lidar or SFM processing (e.g., DJI Terra, Pix4d) and creates a standard set of raster and vector map layers, and some simple graphs.
 ### StandardReport.R
 Creates a standard report which includes tables and figures and some explanation about how and why they were created.
+### ALS_forestry_visualization.R
+Currently does a passable job of removing shadows from NAIP imagery. In the future, it will use the shadowless NAIP imagery to map RGB color information to ALS point clouds and display 3D scenes of current and future forest conditions.
+### ALS_viz_functions.py
+Python OpenCV functions to help remove shadows from NAIP imagery. You need this to run ALS_forestry_visualization.R.

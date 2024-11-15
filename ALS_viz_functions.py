@@ -49,9 +49,11 @@ def remove_shadow(image_path, blur=5, threshBlockSize=11, noisGapKernel=3, inpai
   # result = cv2.bitwise_and(image, image, mask=thresh)
   
   result = cv2.inpaint(image, thresh.astype(np.uint8), 4, cv2.INPAINT_TELEA)
-  result = cv2.flip(result, 0)
+  result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
   
-  cv2.imwrite("../../../FCFO_CarterLake_lidar_visulazation/naip/bananas.tif", result)
+  cv2.imwrite(image_path[:len(image_path)-4]+"_shadowless.tif", result)
+  
+  return result
 
 
 def remove_shadows_simple(image):

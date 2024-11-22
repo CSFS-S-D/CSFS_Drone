@@ -57,6 +57,9 @@ def remove_shadow(image_path, blur=5, threshBlockSize=11, noisGapKernel=3, inpai
 
 
 def remove_shadows_simple(image):
+  # load image 
+  image = cv2.imread(image_path)
+  
   # Convert to LAB color space
   lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
   
@@ -66,5 +69,22 @@ def remove_shadows_simple(image):
   
   # Inpainting (using OpenCV's Telea inpainting)
   result = cv2.inpaint(image, shadow_mask.astype(np.uint8), 3, cv2.INPAINT_TELEA)
+  result = cv2.cvtColor(result, cv2.COLOR_LAB2RGB)
   
   return result
+
+
+def enhance_pic(image_path, brightness=10, contrast=1.2, output_dir=None):
+  # load image 
+  image = cv2.imread(image_path)
+  
+  # Do the adjusting
+  result = cv2.addWeighted(image, contrast, np.zeros(image.shape, image.dtype), 0, brightness) 
+  result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+  
+  # write to file if a directory is specified
+  if output_dir is not None:
+    cv2.imwrite(output_dir+"enhanced.tif", result)
+
+  # return the more awesome-looking picture  
+  return(result)

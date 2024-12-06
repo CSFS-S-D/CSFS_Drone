@@ -132,13 +132,13 @@ ortho_thin = function(las) {
 }
 
 # Visualize landscapes
-landscape_viz = function(las, bg_col="skyblue"){
+landscape_viz = function(las, bg_col="skyblue", texture_file){
   dtm = rasterize_terrain(las, res=1, knnidw())
   open3d()
   bg3d(bg_col)
   surface3d(seq(xmin(dtm),xmax(dtm)-1,1), seq(ymax(dtm)-1,ymin(dtm),-1), 
             matrix(values(dtm)[,1],nrow=ncol(dtm)), color="white", specular="black", lit=F,
-            texture="../../../FCFO_CarterLake_lidar_visulazation/low_thin_ortho.png")
+            texture=texture_file)
   points3d(las$X, las$Y, las$Z, 
            color=rgb(las$R, las$G, las$B, maxColorValue = 65535),
            size=4)
@@ -267,7 +267,7 @@ output = catalog_apply(ctg, pc_segment, chm=chm, ttops=ttops, .options=opt)
 #####               Virtual thinning                                      ######
 ################################################################################
 
-las = readLAS("../../../FCFO_CarterLake_lidar_visulazation/las/segmented/segmented_480000_4459500.las")
+las = readLAS("../../../FCFO_CarterLake_lidar_visulazation/las/segmented/segmented_480000_4464000.las")
 las_low = pc_thin(las, ttops, take = "dbh_cm<30")
 
 # make an orthomosaic-like image the shows the thinning
@@ -275,10 +275,11 @@ low_ortho = ortho_thin(las_low)
 
 # inpaint using the "inpaint" python script sourced above
 values(low_ortho) = values(rast(inpaint(as.array(low_ortho))))
+writeRaster(low_ortho, "../../../FCFO_CarterLake_lidar_visulazation/Products/Textures/low_ortho_example.png", overwrite=T)
 
 # plot the original and the thinned version
-landscape_viz(las)
-landscape_viz(las_low)
+landscape_viz(las, texture_file = "../../../FCFO_CarterLake_lidar_visulazation/Products/Textures/low_ortho_example.png")
+landscape_viz(las_low, texture_file = "../../../FCFO_CarterLake_lidar_visulazation/Products/Textures/low_ortho_example.png")
 
 # Pay attention to which window is the Focus window
 snapshot3d("../../../FCFO_CarterLake_lidar_visulazation/Products/Images/Current_example.png")

@@ -102,7 +102,7 @@ def inpaint(image):
     
   # make mask
   mask = image[:,:,1]
-  (mask == 0).astype('uint8')
+  mask = (mask == 0).astype('uint8')
   
   #mask = cv2.imread(mask, cv2.IMREAD_GRAYSCALE)
   dst = cv2.inpaint(image,mask,4,cv2.INPAINT_TELEA)

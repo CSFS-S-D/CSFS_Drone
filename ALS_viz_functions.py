@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def remove_shadow(image_path, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKernel=4 ):
+def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKernel=4 ):
   """
   Parameters:
     blur (int): size of the floating window used to smooth the image
@@ -13,7 +13,8 @@ def remove_shadow(image_path, blur=5, threshBlockSize=11, noisGapKernel=3, inpai
     """
   
   # load image 
-  image = cv2.imread(image_path)
+  if type(image) == str:
+    image = cv2.imread(image_path)
   
   # Convert to grayscale
   gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -74,9 +75,10 @@ def remove_shadows_simple(image):
   return result
 
 
-def enhance_pic(image_path, brightness=10, contrast=1.2, output_dir=None):
+def enhance_pic(image, brightness=10, contrast=1.2, output_dir=None):
   # load image 
-  image = cv2.imread(image_path)
+  if type(image) == str:
+    image = cv2.imread(image_path)
   
   # Do the adjusting
   result = cv2.addWeighted(image, contrast, np.zeros(image.shape, image.dtype), 0, brightness) 
@@ -88,3 +90,22 @@ def enhance_pic(image_path, brightness=10, contrast=1.2, output_dir=None):
 
   # return the more awesome-looking picture  
   return(result)
+
+def inpaint(image):
+  
+  # Load images
+  if type(image) == str:
+    image = cv2.imread(image)
+  else:
+    image = image.astype('uint8')
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    
+  # make mask
+  mask = image[:,:,1]
+  (mask == 0).astype('uint8')
+  
+  #mask = cv2.imread(mask, cv2.IMREAD_GRAYSCALE)
+  dst = cv2.inpaint(image,mask,4,cv2.INPAINT_TELEA)
+  dst = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
+  
+  return dst

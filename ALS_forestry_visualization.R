@@ -2,7 +2,7 @@
 # Purpose     Visualize forest management with lidar and aerial imagery
 # Person      Andy Whelan
 # Date        November 5, 2024
-# Modified    November 5, 2024
+# Modified    January 8, 2025
 ################################################################################
 
 
@@ -11,6 +11,14 @@
 ################################################################################
 
 # R libraries
+
+## install lasR from the r-univers
+install.packages("lasR", repos = "https://r-lidar.r-universe.dev")
+
+## install TreeLS from github
+remotes::install_github(repo = "tiagodc/TreeLS", upgrade = F)
+# install cloud2trees
+remotes::install_github(repo = "georgewoolsey/cloud2trees", upgrade = F)
 library(reticulate)
 library(terra)
 library(lidR)
@@ -20,13 +28,18 @@ library(cloud2trees)
 library(sf)
 library(rgl)
 
+### Get external data for cloud2trees. 
+# get_data(force=T)
+
+### Install Python. Only need to do this once
 # install_miniconda(update = T)
 # conda_list()
-use_condaenv(condaenv = "r-reticulate")
+# use_condaenv(condaenv = "r-reticulate")
 
-# Install python modules if needed
-py_install("opencv-python", pip=T)
-py_install("numpy")
+### Install python modules if needed
+# py_install("opencv-python", pip=T)
+# py_install("numpy")
+
 
 # Load python functions from ALS_viz_functions.py
 source_python("ALS_viz_functions.py")
@@ -80,7 +93,7 @@ pc_thin = function(las_files, ttops, take, qprob=0.75) { # ttops with take/leave
   ttops$takeTree = 0 # 0 means not taken, 1 means take
   
   # which trees to take
-  ttops$takeTree[eval(parse(text=paste0("ttops$",take)))] = 1
+  ttops$takeTree[eval(parse(text=take))] = 1
   
   takes = which(las$treeID %in% ttops$treeID[ttops$takeTree==1] & las$Classification != 2)
   R_ground = round(quantile(las$R[las$Classification == 2], prob=qprob))
@@ -213,7 +226,7 @@ chm = rasterize_canopy(lass, 1, pitfree())
 # after messing around with it, this is pretty good for the Carter Lake area.
 # There are a bunch of scrubby junipers around in the foothills that result
 # in too many trees with a linear function. This probably could be worked on
-# more, but a logrhythmic function seemed like a good spot to start.
+# more, but a logarithmic function seemed like a good spot to start.
 
 ws = function(x) {
 y <- dplyr::case_when(is.na(x) ~ 0.001, x < 0 ~ 0.001, x < 2 ~
@@ -227,9 +240,13 @@ plot(sf::st_geometry(ttops), add = TRUE, pch = 3)
 
 
 output = cloud2trees(output_dir="../../../FCFO_CarterLake_lidar_visulazation/C2T_products/", 
-                     input_las_dir="../../../FCFO_CarterLake_lidar_visulazation/las/colorized", 
+                     input_las_dir="../../../FCFO_CarterLake_lidar_visulazation/las/colorized/", 
                      chm_res_m = 1,
                      estimate_tree_dbh=T,
+                     estimate_tree_cbh = T,
+                     cbh_estimate_missing_cbh = T,
+                     estimate_tree_competition = T,
+                     estimate_tree_type = T,
                      ws = ws)
 
 
@@ -261,6 +278,8 @@ plot(ctg, chunk_pattern=T)
 options(future.globals.maxSize=2400*1024^2)
 output = catalog_apply(ctg, pc_segment, chm=chm, ttops=ttops, .options=opt)
 
+# Save ttops with the new treeIDs
+st_write(ttops, "../../../FCFO_CarterLake_lidar_visulazation/Products/Vector/ttops.gpkg")
 
 
 ################################################################################
@@ -270,7 +289,7 @@ output = catalog_apply(ctg, pc_segment, chm=chm, ttops=ttops, .options=opt)
 las = readLAS("../../../FCFO_CarterLake_lidar_visulazation/las/segmented/segmented_480000_4464000.las")
 las_low = pc_thin(las, ttops, take = "dbh_cm<30")
 
-# make an orthomosaic-like image the shows the thinning
+# make an orthomosaic-like image that shows the thinning
 low_ortho = ortho_thin(las_low)
 
 # inpaint using the "inpaint" python script sourced above

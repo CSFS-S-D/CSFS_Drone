@@ -12,7 +12,7 @@
 
 # R libraries
 
-## install lasR from the r-univers
+## install lasR from the r-universe
 install.packages("lasR", repos = "https://r-lidar.r-universe.dev")
 
 ## install TreeLS from github
@@ -28,7 +28,7 @@ library(cloud2trees)
 library(sf)
 library(rgl)
 
-### Get external data for cloud2trees. 
+### Get external data for cloud2trees.
 # get_data(force=T)
 
 ### Install Python. Only need to do this once
@@ -51,37 +51,43 @@ source_python("ALS_viz_functions.py")
 pc_clean = function(chunk, ortho) {
   las = readLAS(chunk)
   if(lidR::is.empty(las)) return(NULL)
-  
+
   las = filter_poi(las, Withheld_flag==F)
   las = classify_noise(las, ivf())
   las = filter_poi(las, Classification!=LASNOISE)
   las = classify_ground(las, csf(sloop_smooth=T))
   las = merge_spatial(las, ortho)
-} 
+
+  return(las)
+}
 
 # Function to segment trees in point clouds
 pc_segment = function(chunk, chm, ttops) {
   las = readLAS(chunk)
   if(lidR::is.empty(las)) return(NULL)
-  
+
   # tree segmentation takes a normalized point cloud
   las = normalize_height(las, knnidw())
   las = segment_trees(las, dalponte2016(chm, ttops))
-  
+
   # save the tree heights in a separate field
   las = add_lasattribute(las, las$Z, "treeHt", "tree heights")
-  
+
   # restore original Z values
   las = unnormalize_height(las)
+
+  return(las)
 }
 
 # Function to digitally remove trees and replace them with something ground colored.
-pc_thin = function(las_files, ttops, take, qprob=0.75) { # ttops with take/leave column, 
-  # take = logical statement for trees to take. e.g., height<10
+pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL, qprob=0.75) { # ttops with take/leave column,
+  # take_trees = Optional tree map sfc points object with treeID field of trees to take. 
+  # ttops = Optional tree map sfc points object with treeID field from which "keep" will query. 
+  # take = If take_trees is null, supply a logical statement for trees to take e.g., height<10
   # qprob = quantile probability to calculate ground color. 0.5 is the mean,
-  # 0.75 is the 3rd quartile which results in a brighter color that usually
-  # looks a little better.
-  
+  # 0.75 is the 3rd quartile which results in brighter colors that usually
+  # look a little better.
+
   if(is.list(las_files) | is.character(las_files)) {
     las = readLAS(las_files)
   }else{
@@ -89,58 +95,69 @@ pc_thin = function(las_files, ttops, take, qprob=0.75) { # ttops with take/leave
   }
   if(lidR::is.empty(las)) return(NULL)
   
-  # take tree column
-  ttops$takeTree = 0 # 0 means not taken, 1 means take
   
-  # which trees to take
-  ttops$takeTree[eval(parse(text=take))] = 1
-  
-  takes = which(las$treeID %in% ttops$treeID[ttops$takeTree==1] & las$Classification != 2)
+  # find a nice ground color
   R_ground = round(quantile(las$R[las$Classification == 2], prob=qprob))
   G_ground = round(quantile(las$G[las$Classification == 2], prob=qprob))
   B_ground = round(quantile(las$B[las$Classification == 2], prob=qprob))
+
   
+  # Is there a treemap?
+  if(is.null(take_trees)) {
+    # take/keep tree column
+    ttops$takeTree = 0 # 0 means take, 1 means keep
+  
+    # which trees to take
+    ttops$takeTree[eval(parse(text=take))] = 1
+  
+    takes = which(las$treeID %in% ttops$treeID[ttops$takeTree==1] & las$Classification!=2)
+    
+  }else{
+    takes = which(las$treeID %in% take_trees$treeID)# & las$Classification!=2)
+  }
+  
+
   las$Z[takes] = las$Z[takes] - las$treeHt[takes]
   las$R[takes] = as.integer(R_ground)
   las$G[takes] = as.integer(G_ground)
   las$B[takes] = as.integer(B_ground)
-  
+
   las = normalize_height(las, knnidw())
   las = filter_poi(las, !is.na(treeID) | Z<2)
   las = unnormalize_height(las)
-  
+
   return(las)
-} 
+}
 
 # Create a 3d boundary and display it on an las plot
 pc_add_polygon = function(poly, dtm, offset) {
   # poly is a spatvector
   # dtm is a spatraster
-  bounds = poly %>% 
-    as.lines() %>% 
+  bounds = poly %>%
+    as.lines() %>%
     extractAlong(x=dtm, xy=T)
-  
+
   names(bounds) = c("ID","X","Y","Z")
-  
+
   # add some height to points to make them easier to see
   bounds$Z = bounds$Z+offset
-  
+
   # return new, baddass layer
   return(bounds)
 }
 
-# make an orthomosaic that reflects virtual thinning. 
+# make an orthomosaic that reflects virtual thinning.
 ortho_thin = function(las) {
   # creates an image like an orthomosaic from the input las object.
   # Note, there will likely be holes that can be filled with the python script
   # inpaint. The returned file is a 3 channel 8 bit image that works well with
   # inpaint.
-  
+
   fu = ~list(R = mean(R), G=mean(G), B=mean(B))
   low_ortho = pixel_metrics(las, fu, res=1)
   values(low_ortho) = as.integer(values(low_ortho)/257) # convert to 8 bit
   values(low_ortho)[which(is.na(values(low_ortho)))] = 0
-  
+
   return(low_ortho)
 }
 
@@ -149,12 +166,12 @@ landscape_viz = function(las, bg_col="skyblue", texture_file){
   dtm = rasterize_terrain(las, res=1, knnidw())
   open3d()
   bg3d(bg_col)
-  surface3d(seq(xmin(dtm),xmax(dtm)-1,1), seq(ymax(dtm)-1,ymin(dtm),-1), 
-            matrix(values(dtm)[,1],nrow=ncol(dtm)), color="white", specular="black", lit=F,
-            texture=texture_file)
-  points3d(las$X, las$Y, las$Z, 
+  points3d(las$X, las$Y, las$Z,
            color=rgb(las$R, las$G, las$B, maxColorValue = 65535),
            size=4)
+  surface3d(seq(xmin(dtm),xmax(dtm)-1,1), seq(ymax(dtm)-1,ymin(dtm),-1),
+            matrix(values(dtm)[,1],nrow=ncol(dtm)), color="white", specular="black", lit=F,
+            texture=texture_file)
 }
 
 
@@ -164,7 +181,7 @@ landscape_viz = function(las, bg_col="skyblue", texture_file){
 
 #------------------------- enhance colors --------------------------------------
 # find orthomosaics
-imgs = list.files("../../../FCFO_CarterLake_lidar_visulazation/naip/", 
+imgs = list.files("../../../FCFO_CarterLake_lidar_visulazation/naip/",
                   recursive=T,
                   pattern="*20130716.tif",
                   full.names = T)
@@ -205,7 +222,7 @@ ctg@processing_options$progress = T
 plot(ctg, chunk_pattern=T)
 
 
-output = catalog_apply(ctg, cleanLAS, ortho=orthos, .options=opt)
+output = catalog_apply(ctg, pc_clean, ortho=orthos, .options=opt)
 
 # index the colorized las files for faster processing
 lasFiles = list.files("../../../FCFO_CarterLake_lidar_visulazation/las/colorized/", full.names = T)
@@ -239,8 +256,8 @@ plot(chm)
 plot(sf::st_geometry(ttops), add = TRUE, pch = 3)
 
 
-output = cloud2trees(output_dir="../../../FCFO_CarterLake_lidar_visulazation/C2T_products/", 
-                     input_las_dir="../../../FCFO_CarterLake_lidar_visulazation/las/colorized/", 
+output = cloud2trees(output_dir="../../../FCFO_CarterLake_lidar_visulazation/C2T_products/",
+                     input_las_dir="../../../FCFO_CarterLake_lidar_visulazation/las/colorized/",
                      chm_res_m = 1,
                      estimate_tree_dbh=T,
                      estimate_tree_cbh = T,
@@ -286,8 +303,9 @@ st_write(ttops, "../../../FCFO_CarterLake_lidar_visulazation/Products/Vector/tto
 #####               Virtual thinning                                      ######
 ################################################################################
 
-las = readLAS("../../../FCFO_CarterLake_lidar_visulazation/las/segmented/segmented_480000_4464000.las")
-las_low = pc_thin(las, ttops, take = "dbh_cm<30")
+take_trees = ttops_thinned[ttops_thinned$is_keep_tree==0,]
+las_low = pc_thin(las, take_trees=take_trees, qprob=0.75)
+# las_low = pc_thin(las, tree_locs, keep = "(!tree_locs$treeID %in% ttops_thinned$treeID)")
 
 # make an orthomosaic-like image that shows the thinning
 low_ortho = ortho_thin(las_low)

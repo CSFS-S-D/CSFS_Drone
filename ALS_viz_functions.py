@@ -78,7 +78,7 @@ def remove_shadows_simple(image):
 def enhance_pic(image, brightness=10, contrast=1.2, output_dir=None):
   # load image 
   if type(image) == str:
-    image = cv2.imread(image_path)
+    image = cv2.imread(image)
   
   # Do the adjusting
   result = cv2.addWeighted(image, contrast, np.zeros(image.shape, image.dtype), 0, brightness) 

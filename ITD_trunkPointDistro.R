@@ -8,8 +8,8 @@ library(rgl)
 
 header = readLASheader("C:/Users/C820392777/Documents/DJI/DJITerra/csfs_drones@colostate.edu/AbbotRidgeHQ_FRWRM_121824/lidars/terra_las/cloud8fa0f164801d49e9.las")
 xt=ext(header)
-xt[2]-(xt[2]-xt[1])/2
-xt[4] -(xt[4]-xt[3])/2
+mean(xt[1:2])
+mean(xt[3:4])
 las = readLAS("C:/Users/C820392777/Documents/DJI/DJITerra/csfs_drones@colostate.edu/AbbotRidgeHQ_FRWRM_121824/lidars/terra_las/cloud8fa0f164801d49e9.las",
               filter="-keep_xy 495370 4110460 495410 4110500")
 

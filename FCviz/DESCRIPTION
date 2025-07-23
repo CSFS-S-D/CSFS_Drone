@@ -1,0 +1,21 @@
+Package: FCviz
+Type: Package
+Title: Visualizes forest treatments using point clouds.
+Version: 0.1.0
+Authors@R: c(
+    person(
+      "Andy", "Whelan",
+      email = "andrew.whelan@colostate.edu",
+      role = c("aut", "cre")
+    )
+  )
+Description: Uses lidar or structure-from-motion point clouds, adds color
+    information from orthomosaic raster, identifies and segments trees, and
+    can digitally remove trees from the point cloud based on user defined
+    criteria. Then it will display the results
+License: No license right now
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2
+Depends: 
+    R (>= 3.5)

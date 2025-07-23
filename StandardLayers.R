@@ -2,7 +2,7 @@
 # Purpose     Create map layers and graphs from drone data
 # Person      Andy Whelan 
 # Date        October 31, 2024
-# Modified    November 11, 2024
+# Modified    July 15, 2025
 ################################################################################
 
 
@@ -24,13 +24,13 @@ library(data.table)
 
 ################################ Setup #########################################
 # set the working directory to the top level of your project.
-setwd("Z:/GIS/Drone/StateForest/SnowCourses_lidar_102524/")
+setwd("Z:/GIS/Drone/DUFO_GrassyMountain07092024/GrassyMountain_DUFO/OUTPUTS/")
 
 # path to folder with .las point clouds.
-las_dir = "Terra_output/las/original/"
+las_dir = "Terra_lidar/"
 
 # path to shapefile of project area boundaries.
-bounds = st_read("SWE_StateForest_Shapefiles/SnowCourseUnits.shp")
+bounds = st_read("../FlightPlan_GrassyMountain_DUFO/GrassyMountain_Final_Units_dis.shp")
 
 # path to orthomosaic (if needed, otherwise NULL).
 ortho = NULL
@@ -45,7 +45,8 @@ dir.create("Products/Cloud2Trees_products/")
 dir.create("Products/Raster/")
 dir.create("Products/Vector/")
 dir.create("Products/las/")
-dir.create("Prodects/Raster/temp/")
+dir.create("Products/las/segmented")
+dir.create("Products/Raster/temp/")
 dir.create("Products/Graphs/")
 dir.create("Products/Animations/")
 
@@ -53,11 +54,31 @@ dir.create("Products/Animations/")
 
 
 ################## Tree and crown processing ###################################
-output = cloud2trees(c2tOutput_dir="Products/Cloud2Trees_products/", 
-                     las_dir, 
+# retile if necessary (drone data will likely need to be retiled)
+dir.create(paste0(las_dir,"retiled/"))
+ctg = catalog(las_dir)
+opt_chunk_buffer(ctg) = 0
+# Think carefully about the chunk size
+opt_chunk_size(ctg) = 300
+opt_chunk_alignment(ctg) = c(0,0)
+opt_output_files(ctg) = "Z:/GIS/Drone/DUFO_GrassyMountain07092024/GrassyMountain_DUFO/OUTPUTS/Terra_lidar/retiled/retile_{XLEFT}_{YBOTTOM}"
+plot(ctg, chunk=T)
+
+catalog_retile(ctg)
+
+# search window size function to detect trees
+ws2 = function(x) { y <- dplyr::case_when(is.na(x) ~ 0.001, x < 0 ~ 0.001, x < 
+                                      8 ~ 2.5, x > 26.5 ~ 5, TRUE ~ exp(-(3.5 * (1/x)) + (x^0.17)))
+return(y)
+}
+
+# cloud2Trees
+output = cloud2trees(output_dir="Products/Cloud2Trees_products/", 
+                     paste0(las_dir,"retiled/"), 
                      dtm_res_m=dtm_res, 
                      chm_res_m=chm_res,
                      estimate_tree_dbh = T,
+                     ws = ws2,
                      estimate_dbh_from_cloud=F)
 ################################################################################
 
@@ -65,12 +86,12 @@ output = cloud2trees(c2tOutput_dir="Products/Cloud2Trees_products/",
 ######################## Make map layers #######################################
 
 # load data from disk
-chm = rast(paste0(c2tOutput_dir, "point_cloud_processing_delivery/chm_", 
+chm = rast(paste0("Products/Cloud2Trees_products/point_cloud_processing_delivery/chm_", 
                   as.character(chm_res),"m.tif"))
-dtm = rast(paste0(c2tOutput_dir, "point_cloud_processing_delivery/dtm_", 
+dtm = rast(paste0("Products/Cloud2Trees_products/point_cloud_processing_delivery/dtm_", 
                   as.character(dtm_res),"m.tif"))
-ttops = st_read(paste0(c2tOutput_dir, "point_cloud_processing_delivery/final_detected_tree_tops.gpkg"))
-crowns = st_read(paste0(c2tOutput_dir, "point_cloud_processing_delivery/final_detected_crowns.gpkg"))
+ttops = st_read("Products/Cloud2Trees_products/point_cloud_processing_delivery/final_detected_tree_tops.gpkg")
+crowns = st_read("Products/Cloud2Trees_products/point_cloud_processing_delivery/final_detected_crowns.gpkg")
 
 
 # rename a couple of things
@@ -160,11 +181,11 @@ catalog_retile(ctg)
 
 
 # Segment point clouds and create density and crown area rasters
-ctg = readLAScatalog("Products/Terra_output/las/retiled/")
-opt_chunk_size(ctg) = 1000
+ctg = readLAScatalog("Terra_lidar/retiled/")
+opt_chunk_size(ctg) = 300
 opt_chunk_buffer(ctg) = 10
 opt_filter(ctg) = ""
-opt_output_files(ctg) <- "Products/Terra_output/las/segmented/segmented_{XLEFT}_{YBOTTOM}"
+opt_output_files(ctg) <- "Products/las/segmented/segmented_{XLEFT}_{YBOTTOM}"
 opt_chunk_alignment(ctg) = c(0,0)
 opt = list(raster_alignment=1)
 plot(ctg, chunk_pattern=T)
@@ -188,6 +209,9 @@ rasters = do.call(c, cropped)
 rasters$dsm = classify(rasters$chm, matrix(c(NA,0), ncol=2))+rasters$dtm
 varnames(rasters$dsm)
 
+# Make sure everything has names.
+names(rasters)[6] = "verticalDensity"
+
 ###################################### Save products ###########################################################
 # Rasters
 for(i in 1:length(names(rasters))) {
@@ -195,12 +219,12 @@ for(i in 1:length(names(rasters))) {
 }
 
 # Vector
-st_write(ttops_c, "Products/Vector/ttops_c.gpkg")
-st_write(crowns, "Products/Vector/crowns.gpkg")
-st_write(clumps, "Products/Vector/canopy_cont.gpkg")
-st_write(bounds, "Products/Vector/bounds.gpkg")
-st_write(bounds_dis, "Products/Vector/bounds_dis.gpkg")
-st_write(bounds_buf, "Products/Vector/bounds_buf.gpkg")
+st_write(ttops_c, "Products/Vector/ttops_c.gpkg", append=F)
+st_write(crowns, "Products/Vector/crowns.gpkg", append=F)
+st_write(clumps, "Products/Vector/canopy_cont.gpkg", append=F)
+st_write(bounds, "Products/Vector/bounds.gpkg", append=F)
+st_write(bounds_dis, "Products/Vector/bounds_dis.gpkg", append=F)
+st_write(bounds_buf, "Products/Vector/bounds_buf.gpkg", append=F)
 
 
 

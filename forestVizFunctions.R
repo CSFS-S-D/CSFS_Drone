@@ -27,9 +27,15 @@ pc_clean = function(chunk, ortho) {
 
 #---> Function to segment trees in point clouds
 pc_segment = function(chunk, chm, ttops) {
-  las = readLAS(chunk)
+  if(class(chunk)!="LAS"){
+    las = readLAS(chunk)
+  }
+  
   if(lidR::is.empty(las)) return(NULL)
 
+  # change treeID to numeric
+  ttops$treeID = as.numeric(gsub("\\D","",ttops$treeID))
+  
   # tree segmentation takes a normalized point cloud
   las = normalize_height(las, knnidw())
   las = segment_trees(las, dalponte2016(chm, ttops))
@@ -44,11 +50,23 @@ pc_segment = function(chunk, chm, ttops) {
 }
 
 
+#-----> Function to get a color swatch from a raster. I'll use it to get represetative ground color.
+color_swatch = function(rast) {
+  plotRGB(rast)
+  message("Draw a color swatch rectangle - click 2 points.")
+  tmp_rect = zoom(rast)
+  tmp_swatch = terra::crop(rast, tmp_rect) %>% terra::mask(tmp_rect)
+  return(tmp_swatch)  
+}
+
+
 #---> Function to digitally remove trees and replace them with something ground colored.
-pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL, qprob=0.75) { # ttops with take/leave column,
+pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL, 
+                   color_swatch=NULL, qprob=0.75) { # ttops with take/leave column,
   # take_trees = Optional tree map sfc points object with treeID field of trees to take. 
   # ttops = Optional tree map sfc points object with treeID field from which "keep" will query. 
   # take = If take_trees is null, supply a logical statement for trees to take e.g., height<10
+  # color_swatch = raster that contains the desired ground color. See "color_swatch."
   # qprob = quantile probability to calculate ground color. 0.5 is the mean,
   # 0.75 is the 3rd quartile which results in brighter colors that usually
   # look a little better.
@@ -61,10 +79,18 @@ pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL, qprob=0.75
   if(lidR::is.empty(las)) return(NULL)
   
   
-  # find a nice ground color
-  R_ground = round(quantile(las$R[las$Classification == 2], prob=qprob))
-  G_ground = round(quantile(las$G[las$Classification == 2], prob=qprob))
-  B_ground = round(quantile(las$B[las$Classification == 2], prob=qprob))
+  # -----> Ground color
+  if(is.null(color_swatch)) {
+    # find a nice ground color
+    R_ground = round(quantile(las$R[las$Classification == 2], prob=qprob))
+    G_ground = round(quantile(las$G[las$Classification == 2], prob=qprob))
+    B_ground = round(quantile(las$B[las$Classification == 2], prob=qprob))
+  }else{
+    # use the color swatch for ground color
+    R_ground = round(quantile(values(color_swatch$R), prob=qprob))*257
+    G_ground = round(quantile(values(color_swatch$G), prob=qprob))*257
+    B_ground = round(quantile(values(color_swatch$B), prob=qprob))*257
+  }
 
   
   # Is there a treemap?

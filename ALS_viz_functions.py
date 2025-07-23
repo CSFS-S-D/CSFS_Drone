@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import sys
+from os import listdir
 
 def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKernel=4 ):
   """
@@ -13,8 +15,13 @@ def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKer
     """
   
   # load image 
+  # Load images
   if type(image) == str:
-    image = cv2.imread(image_path)
+    image = cv2.imread(image)
+  else:
+    image = image.astype('uint8')
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+  
   
   # Convert to grayscale
   gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -52,7 +59,7 @@ def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKer
   result = cv2.inpaint(image, thresh.astype(np.uint8), 4, cv2.INPAINT_TELEA)
   result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
   
-  cv2.imwrite(image_path[:len(image_path)-4]+"_shadowless.tif", result)
+  # cv2.imwrite(image_path[:len(image)-4]+"_shadowless.tif", result)
   
   return result
 
@@ -109,3 +116,34 @@ def inpaint(image):
   dst = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
   
   return dst
+
+def stitch(image_path):
+ 
+  # image paths
+  images = list(filter(lambda x:'JPG' in x, listdir(image_path)))
+  # read input images
+  imgs = []
+  for img_name in images:
+      img = cv2.imread(image_path+img_name)
+      if img is None:
+          print("can't read image " + img_name)
+          sys.exit(-1)
+      imgs.append(img)
+
+  #![stitching]
+  stitcher = cv2.Stitcher.create(cv2.Stitcher_SCANS)
+  stitcher.setPanoConfidenceThresh(0.5)
+  status, mosaic = stitcher.stitch(imgs)
+
+  if status != cv2.Stitcher_OK:
+      print("Can't stitch images.")
+      sys.exit(-1)
+  #![stitching]
+
+  # cv.imwrite(args.output, mosaic)
+  del(stitcher)
+  del(images)
+  return mosaic
+  # print("stitching completed successfully. %s saved!" % args.output)
+
+  print('Done')

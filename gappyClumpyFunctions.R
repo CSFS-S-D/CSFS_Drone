@@ -2,7 +2,7 @@
 # Purpose     Gappy-clumpy thinning functions for use with gappyClumpyThin.R
 # Person      Andy Whelan
 # Date        December 9, 2024
-# Modified    February 27, 2025
+# Modified    March 4, 2025
 ################################################################################
 
 
@@ -24,6 +24,22 @@ forested = function(las, w=5, res=5, n=5) {
 }
 
 
+poly_split = function(poly, ttops) {
+  # split prod into smaller polygons if there are more than 30000 trees in ttops_temp
+  ttops_temp =  st_intersection(ttops,poly)
+  
+  if(nrow(ttops_temp)<=30000) {
+    polys = poly
+  }else{
+    grps = ceiling(nrow(ttops_temp)/30000)
+    polys = divider(vect(poly), grps) %>% 
+      st_as_sf() %>% 
+      st_cast("MULTIPOLYGON") %>% 
+      st_cast("POLYGON")
+  }
+  return(polys)
+}
+
 #---> Thin the forest controlled with some groupy-gappy parameters
 forestThin_gg = function(prod, 
                          ttops, 
@@ -32,6 +48,7 @@ forestThin_gg = function(prod,
                          target_ba,
                          target_qmd,
                          target_pcts) {
+  
   
   thinned=list()
   for(i in 1:nrow(prod)) {
@@ -52,7 +69,7 @@ forestThin_gg = function(prod,
     ttops_temp = get_tree_clumps(
       ttops
       , stand_sf
-      , tree_clump_dist_m = 6
+      , tree_clump_dist_m = tree_clump_dist_m
       , ostory_dbh_cm = ostory_dbh_cm # 6 in dbh
     )
     
@@ -1074,10 +1091,10 @@ st_perp_line <- function(interval=0.5, my_line, proportion=TRUE) {
   yn_len <- (line_len / ref_len) * (p2[2] - point[2])
   
   # fix for identical 
-  if(identical(point,p2) & x_len>y_len){ # this works for horizontal line
+  if(identical(point,p2[1:2]) & x_len>y_len){ # this works for horizontal line
     xn_len <- line_len/2
     yn_len <- 0
-  }else if(identical(point,p2) & x_len<y_len){ # this works for vertical line
+  }else if(identical(point,p2[1:2]) & x_len<y_len){ # this works for vertical line
     xn_len <- 0
     yn_len <- line_len/2
   }
@@ -1232,7 +1249,18 @@ cut_clump_fn <- function(
           i_trees = curr_dta %>% 
             sf::st_intersection(poly_keep) %>% 
             st_clump_points(clump_dist_m = dist_temp)
-          i_trees %>% sf::st_drop_geometry() %>% dplyr::count(clump_n_trees_grp, clump_id)
+          
+          # Did we skip from multiple clumps smaller than the tgt to a clump larger than the tgt?
+          # if so, select new start tree and start tree additions over.
+          clump_temp_summary = i_trees %>% sf::st_drop_geometry() %>% dplyr::count(clump_n_trees_grp, clump_id)
+          if(any(clump_temp_summary$clump_n_trees_grp>tgt)) {
+            start_tree = curr_dta %>% 
+              dplyr::arrange(desc(dbh_cm)) %>% 
+              dplyr::filter(dplyr::row_number() == sample(1:nrow(curr_dta), 1))
+            k=1
+            next
+          }
+          
           # keep only the desired clump
           keep_trees = i_trees %>% 
             sf::st_drop_geometry() %>% 

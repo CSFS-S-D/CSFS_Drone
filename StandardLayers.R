@@ -24,20 +24,22 @@ library(data.table)
 
 ################################ Setup #########################################
 # set the working directory to the top level of your project.
-setwd("Z:/GIS/Drone/DUFO_GrassyMountain07092024/GrassyMountain_DUFO/OUTPUTS/")
+setwd("OUTPUTS/")
 
 # path to folder with .las point clouds.
-las_dir = "Terra_lidar/"
+las_dir = "../LAS/"
 
 # path to shapefile of project area boundaries.
-bounds = st_read("../FlightPlan_GrassyMountain_DUFO/GrassyMountain_Final_Units_dis.shp")
+bounds = st_read("../Shapefiles/FriscoBackyard_Units/FriscoBackyard_Units/FriscoBackyard_Units.shp")
+plot(bounds['Phase_1'])
+bounds = subset(bounds, Phase_1==1)
 
 # path to orthomosaic (if needed, otherwise NULL).
 ortho = NULL
 
 # DTM and CHM constants for cloud to trees.
-dtm_res = 0.25
-chm_res = 0.25
+dtm_res = 1
+chm_res = 1
 
 # create output file structure
 dir.create("Products/")
@@ -74,10 +76,20 @@ return(y)
 
 # cloud2Trees
 output = cloud2trees(output_dir="Products/Cloud2Trees_products/", 
-                     paste0(las_dir,"retiled/"), 
+                     paste0(las_dir), 
                      dtm_res_m=dtm_res, 
                      chm_res_m=chm_res,
                      estimate_tree_dbh = T,
+                     estimate_tree_cbh = T,
+                     cbh_estimate_missing_cbh = T,
+                     estimate_tree_hmd = T,
+                     hmd_estimate_missing_hmd = T,
+                     estimate_tree_type = T,
+                     estimate_tree_competition = T,
+                     estimate_biomass_method=c("landfire", "cruz"),
+                     type_max_search_dist_m = 300,
+                     hmd_tree_sample_n = 500,
+                     cbh_tree_sample_n = 500,
                      ws = ws2,
                      estimate_dbh_from_cloud=F)
 ################################################################################
@@ -90,8 +102,8 @@ chm = rast(paste0("Products/Cloud2Trees_products/point_cloud_processing_delivery
                   as.character(chm_res),"m.tif"))
 dtm = rast(paste0("Products/Cloud2Trees_products/point_cloud_processing_delivery/dtm_", 
                   as.character(dtm_res),"m.tif"))
-ttops = st_read("Products/Cloud2Trees_products/point_cloud_processing_delivery/final_detected_tree_tops.gpkg")
-crowns = st_read("Products/Cloud2Trees_products/point_cloud_processing_delivery/final_detected_crowns.gpkg")
+ttops = st_read("Products/Cloud2Trees_products/point_cloud_processing_delivery/ttops_big.gpkg")
+crowns = st_read("Products/Cloud2Trees_products/point_cloud_processing_delivery/crowns_big.gpkg")
 
 
 # rename a couple of things
@@ -146,9 +158,9 @@ crown_cat = function(chunk, chm, ttops, res) {
   xmin=round(ext(las)[1])
   ymin=round(ext(las)[3])
   
-  las = classify_noise(las, ivf(res=1, n=10))
-  las = filter_poi(las, Classification!=LASNOISE)
-  las = classify_ground(las, csf(sloop_smooth=TRUE, rigidness = 2))
+  # las = classify_noise(las, ivf(res=1, n=10))
+  # las = filter_poi(las, Classification!=LASNOISE)
+  las = classify_ground(las, csf(sloop_smooth=TRUE, rigidness = 1))
   las = normalize_height(las, knnidw(k=10, p=2)) # Need a normalized las for vertical density
   las = filter_poi(las, Z>=0)
   las = segment_trees(las, algorithm = dalponte2016(chm, ttops, max_cr=100))
@@ -158,8 +170,8 @@ crown_cat = function(chunk, chm, ttops, res) {
   
   rStack = c(crown_rast, verticalDens1)
   names(rStack) =c("cr", "vd")
-  writeRaster(rStack, paste0("Z:\\GIS\\Drone\\StateForest\\SnowCourses_lidar_102524\\Products\\Raster\\temp\\crown_rasts_",
-                             xmin,"_",ymin,".tif"))
+  writeRaster(rStack, paste0("Products\\Raster\\temp\\crown_rasts_",
+                             xmin,"_",ymin,".tif"), overwrite=T)
   
   las = unnormalize_height(las)
   return(las)
@@ -170,27 +182,29 @@ crown_cat = function(chunk, chm, ttops, res) {
 # ---- set up the catalog processing ----
 
 # retile to get rid of overlap
-ctg = readLAScatalog("Products/Terra_output/")
+ctg = readLAScatalog("Products/Cloud2Trees_products/point_cloud_processing_temp/01_classify/")
 opt_chunk_size(ctg) = 1000
 opt_chunk_buffer(ctg) = 0
 opt_filter(ctg) = ""
-opt_output_files(ctg) <- "Products/Terra_output/las/retiled/retiled_{XLEFT}_{YBOTTOM}"
+opt_output_files(ctg) <- "Products/las/retiled/retiled_{XLEFT}_{YBOTTOM}"
 ctg@processing_options$progress = T
 
 catalog_retile(ctg)
 
 
 # Segment point clouds and create density and crown area rasters
-ctg = readLAScatalog("Terra_lidar/retiled/")
-opt_chunk_size(ctg) = 300
+ctg = readLAScatalog("Products/las/retiled")
+opt_chunk_size(ctg) = 1000
 opt_chunk_buffer(ctg) = 10
 opt_filter(ctg) = ""
 opt_output_files(ctg) <- "Products/las/segmented/segmented_{XLEFT}_{YBOTTOM}"
 opt_chunk_alignment(ctg) = c(0,0)
 opt = list(raster_alignment=1)
+ctg@processing_options$progress = T
+options(future.globals.maxSize=1000000000)
 plot(ctg, chunk_pattern=T)
 
-output = catalog_apply(ctg, crown_cat, chm, ttops_c, res=0.25, .options=opt)
+output = catalog_apply(ctg, crown_cat, chm, ttops_c, res=1, .options=opt)
 
 
 # Crop crown area and crown density rasters
@@ -212,7 +226,54 @@ varnames(rasters$dsm)
 # Make sure everything has names.
 names(rasters)[6] = "verticalDensity"
 
-###################################### Save products ###########################################################
+
+
+################################################################################
+#####               Virtual thinning                                      ######
+################################################################################
+#-------> tree_tops
+ttops_c = sf::st_intersection(ttops, bounds)
+ttops_c$treeID_ref = ttops_c$treeID
+ttops_c$treeID = 1:nrow(ttops_c)
+
+# virtual thin
+ttops_c$lowThin = 1 # 1 means cut
+ttops_c$highThin = 1
+ttops_c$uniformThing = 1
+
+ttops_c$lowThin[ttops_c$dbh_cm > 30] = 0 # 0 means it didn't get cut
+ttops_c$highThin[ttops_c$dbh_cm < 30] = 0
+ttops_c$uniformThin[sample(nrow(ttops_c), nrow(ttops_c)*0.33)] = 0
+
+#-------> crowns
+crowns = sf::st_intersection(crowns, bounds_dis)
+
+# virtual thin
+crowns$lowThin = 1
+crowns$highThin = 1
+crowns$uniformThin = 1
+
+crowns$lowThin[crowns$treeID %in% ttops_c$treeID_ref[ttops_c$lowThin == 0]] = 0
+crowns$highThin[crowns$treeID %in% ttops_c$treeID_ref[ttops_c$highThin == 0]] = 0
+crowns$uniformThin[crowns$treeID %in% ttops_c$treeID_ref[ttops_c$uniformThin == 0]] = 0
+
+#-------> Make crown continuity maps
+clumps <- crowns %>% sf::st_union() %>% sf::st_sf() %>% sf::st_cast("POLYGON")
+clumps$area = as.numeric(sf::st_area(clumps))
+
+lowThinClumps <- subset(crowns, lowThin==0) %>% sf::st_union() %>% sf::st_sf() %>% sf::st_cast("POLYGON")
+lowThinClumps$area = as.numeric(sf::st_area(lowThinClumps))
+
+highThinClumps <- subset(crowns, highThin==0) %>% sf::st_union() %>% sf::st_sf() %>% sf::st_cast("POLYGON")
+highThinClumps$area = as.numeric(sf::st_area(highThinClumps))
+
+uniformThinClumps <- subset(crowns, uniformThin==0) %>% sf::st_union() %>% sf::st_sf() %>% sf::st_cast("POLYGON")
+uniformThinClumps$area = as.numeric(sf::st_area(uniformThinClumps))
+
+
+################################################################################
+###################################### Save products ###########################
+################################################################################
 # Rasters
 for(i in 1:length(names(rasters))) {
   writeRaster(rasters[[i]], paste0("Products/Raster/",names(rasters)[i],".tif"), overwrite=T)
@@ -222,6 +283,9 @@ for(i in 1:length(names(rasters))) {
 st_write(ttops_c, "Products/Vector/ttops_c.gpkg", append=F)
 st_write(crowns, "Products/Vector/crowns.gpkg", append=F)
 st_write(clumps, "Products/Vector/canopy_cont.gpkg", append=F)
+st_write(lowThinClumps, "Products/Vector/lowThin_canopy_cont.gpkg", append=F)
+st_write(highThinClumps, "Products/Vector/highThin_canopy_cont.gpkg", append=F)
+st_write(uniformThinClumps, "Products/Vector/uniformThin_canopy_cont.gpkg", append=F)
 st_write(bounds, "Products/Vector/bounds.gpkg", append=F)
 st_write(bounds_dis, "Products/Vector/bounds_dis.gpkg", append=F)
 st_write(bounds_buf, "Products/Vector/bounds_buf.gpkg", append=F)
@@ -244,7 +308,7 @@ plot(rasters$chm, pax=list(cex.axis=5), plg=list(cex=5), mar=c(3.1,4.1,2.1,9.1))
 dev.off()
 
 png("Products/Graphs/wholeVD.png", height=2500, width=4000)
-plot(rasters$vd, pax=list(cex.axis=5), plg=list(cex=5), mar=c(3.1,4.1,2.1,9.1), col=map.pal("byg", n=100))
+plot(rasters$verticalDensity, pax=list(cex.axis=5), plg=list(cex=5), mar=c(3.1,4.1,2.1,9.1), col=map.pal("byg", n=100))
 dev.off()
 
 # Multipanel
@@ -254,9 +318,9 @@ plot(rasters$dsm, pax=list(cex.axis=5),
      plg=list(cex=3), mar=c(5.1,5.1,4.1,6.1))
 plot(rasters$dtm, pax=list(cex.axis=5),
      plg=list(cex=3), mar=c(5.1,5.1,4.1,6.1), col=inferno(100))
-plot(rasters$slope, pax=list(cex.axis=5), plg=list(cex=3, x="topleft"), mar=c(5.1,5.1,4.1,6.1), col=map.pal("gyr", n=11), 
+plot(rasters$slope, pax=list(cex.axis=5), plg=list(cex=3, x="bottomleft"), mar=c(5.1,5.1,4.1,6.1), col=map.pal("gyr", n=11), 
      breaks=c(0,1.72,3.43,5.71,8.53,11.3,14.04,16.7,21.8,30.96,45,90))
-plot(rasters$aspect, pax=list(cex.axis=5),plg=list(cex=3, x="topleft"), mar=c(5.1,5.1,4.1,6.1), 
+plot(rasters$aspect, pax=list(cex.axis=5),plg=list(cex=3, x="bottomleft"), mar=c(5.1,5.1,4.1,6.1), 
      col=c("gray","red","orange","yellow","green","skyblue","blue","purple4","magenta","orangered"),
      breaks=c(-1,0,22.5,67.5,112.5,157.5,202.5,247.5,292.5,337.5,360))
 dev.off()
@@ -273,14 +337,14 @@ png("Products/Graphs/treeMap_zoom.png", height=3000, width=4000)
 par(mfrow=c(2,1))
 plot(rasters$chm, pax=list(cex.axis=5), plg=list(cex=5), mar=c(3.1,4.1,2.1,9.1))
 plot(ttops['tree_height_m'], add=T, col="black", pch=20, cex=2)
-plot(rasters$chm, pax=list(cex.axis=5), plg=list(cex=5), mar=c(3.1,4.1,2.1,9.1), ext=ext(c(416000,416375, 4494233,4494400)))
-plot(ttops['tree_height_m'], add=T, col="black", pch=20, cex=3, ext=ext(c(416000,416375, 4494233,4494400)))
+plot(rasters$chm, pax=list(cex.axis=5), plg=list(cex=5), mar=c(3.1,4.1,2.1,9.1), ext=ext(c(-858000,-857900, 1882000,1882100)))
+plot(ttops['tree_height_m'], add=T, col="black", pch=20, cex=3, ext=ext(c(-858000,-857900, 1882000,1882100)))
 dev.off()
 
 
 #---> crown density map 
 ggplot(crowns) + geom_sf(aes(fill=crown_area_m2, color=crown_area_m2)) + 
-  coord_sf(datum=st_crs(32613)) +
+  coord_sf(datum=st_crs(5070)) +
   scale_fill_continuous(type="viridis") +
   scale_color_continuous(type="viridis") +
   labs(color=expression(paste("Area (",m^2,")")), fill=expression(paste("Area (",m^2,")"))) +
@@ -290,7 +354,7 @@ ggplot(crowns) + geom_sf(aes(fill=crown_area_m2, color=crown_area_m2)) +
         legend.title=element_text(size=6),
         legend.text=element_text(size=4),
         legend.position = "inside",
-        legend.position.inside=c(0.045,0.24),
+        legend.position.inside=c(0.09,0.24),
         legend.key.size = unit(0.5, "cm"),
         panel.grid.major = element_blank())
 
@@ -309,11 +373,67 @@ ggplot(clumps) + geom_sf(aes(fill=area, color=area)) +
         legend.title=element_text(size=6),
         legend.text=element_text(size=4),
         legend.position = "inside",
-        legend.position.inside=c(0.05,0.24),
+        legend.position.inside=c(0.09,0.24),
         legend.key.size = unit(0.5, "cm"),
         panel.grid.major = element_blank())
 
 ggsave("Products/Graphs/clumpArea.png", height=5, width=8, dpi=600)
+
+# low thin clump area map 
+ggplot(lowThinClumps) + geom_sf(aes(fill=area, color=area)) + 
+  coord_sf(datum=st_crs(32613)) +
+  scale_fill_continuous(type="viridis") +
+  scale_color_continuous(type="viridis") +
+  labs(color=expression(paste("Area (",m^2,")")), fill=expression(paste("Area (",m^2,")"))) +
+  theme_bw() +
+  theme(axis.text=element_text(size=6),
+        axis.text.y=element_text(angle=90),
+        legend.title=element_text(size=6),
+        legend.text=element_text(size=4),
+        legend.position = "inside",
+        legend.position.inside=c(0.09,0.24),
+        legend.key.size = unit(0.5, "cm"),
+        panel.grid.major = element_blank())
+
+ggsave("Products/Graphs/lowThinClumpArea.png", height=5, width=8, dpi=600)
+
+# high thin clump area map 
+ggplot(highThinClumps) + geom_sf(aes(fill=area, color=area)) + 
+  coord_sf(datum=st_crs(32613)) +
+  scale_fill_continuous(type="viridis") +
+  scale_color_continuous(type="viridis") +
+  labs(color=expression(paste("Area (",m^2,")")), fill=expression(paste("Area (",m^2,")"))) +
+  theme_bw() +
+  theme(axis.text=element_text(size=6),
+        axis.text.y=element_text(angle=90),
+        legend.title=element_text(size=6),
+        legend.text=element_text(size=4),
+        legend.position = "inside",
+        legend.position.inside=c(0.09,0.24),
+        legend.key.size = unit(0.5, "cm"),
+        panel.grid.major = element_blank())
+
+ggsave("Products/Graphs/highThinClumpArea.png", height=5, width=8, dpi=600)
+
+
+# uniform thin clump area map 
+ggplot(uniformThinClumps) + geom_sf(aes(fill=area, color=area)) + 
+  coord_sf(datum=st_crs(32613)) +
+  scale_fill_continuous(type="viridis") +
+  scale_color_continuous(type="viridis") +
+  labs(color=expression(paste("Area (",m^2,")")), fill=expression(paste("Area (",m^2,")"))) +
+  theme_bw() +
+  theme(axis.text=element_text(size=6),
+        axis.text.y=element_text(angle=90),
+        legend.title=element_text(size=6),
+        legend.text=element_text(size=4),
+        legend.position = "inside",
+        legend.position.inside=c(0.09,0.24),
+        legend.key.size = unit(0.5, "cm"),
+        panel.grid.major = element_blank())
+
+ggsave("Products/Graphs/uniformThinClumpArea.png", height=5, width=8, dpi=600)
+
 
 
 ################################### End ########################################

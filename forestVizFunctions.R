@@ -79,6 +79,7 @@ pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL,
   if(lidR::is.empty(las)) return(NULL)
   
   
+  
   # -----> Ground color
   if(is.null(color_swatch)) {
     # find a nice ground color
@@ -101,10 +102,12 @@ pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL,
     # which trees to take
     ttops$takeTree[eval(parse(text=take))] = 1
   
-    takes = which(las$treeID %in% ttops$treeID[ttops$takeTree==1] & las$Classification!=2)
+    takes = which(las$treeID %in% na.omit(ttops$treeID[ttops$takeTree==1]))
     
   }else{
     takes = which(las$treeID %in% take_trees$treeID)# & las$Classification!=2)
+    other = which(las$Z>1)
+    takes = which(takes %in% other)
   }
   
 
@@ -113,6 +116,7 @@ pc_thin = function(las_files, take_trees=NULL, ttops=NULL, take=NULL,
   las$G[takes] = as.integer(G_ground)
   las$B[takes] = as.integer(B_ground)
 
+  # normalize height
   las = normalize_height(las, knnidw())
   las = filter_poi(las, !is.na(treeID) | Z<2)
   las = unnormalize_height(las)
@@ -165,7 +169,18 @@ landscape_viz = function(las, bg_col="skyblue", texture_file){
   points3d(las$X, las$Y, las$Z,
            color=rgb(las$R, las$G, las$B, maxColorValue = 65535),
            size=4)
-  surface3d(seq(xmin(dtm),xmax(dtm)-1,1), seq(ymax(dtm)-1,ymin(dtm),-1),
-            matrix(values(dtm)[,1],nrow=ncol(dtm)), color="white", specular="black", lit=F,
+  surface3d(seq(terra::xmin(dtm),terra::xmax(dtm)-1,1), seq(terra::ymax(dtm)-1,terra::ymin(dtm),-1),
+            matrix(terra::values(dtm)[,1],nrow=ncol(dtm)), color="white", specular="black", lit=F,
             texture=texture_file)
 }
+
+# p1 = open3d() + bg3d("skyblue") + surface3d(seq(terra::xmin(dtm),terra::xmax(dtm)-1,1), 
+#                                                 seq(terra::ymax(dtm)-1,terra::ymin(dtm),-1),
+#                                                 matrix(terra::values(dtm)[,1],nrow=ncol(dtm)), 
+#                                                 color="white", specular="black", lit=F,
+#                                                 texture="grassyMountainTest_texture.png")
+# 
+# coords = sf::st_coordinates(ttops)
+# spheres3d(x=coords[,1],y=coords[,2],coords[,3], add=T)
+
+

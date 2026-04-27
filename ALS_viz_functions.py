@@ -3,7 +3,7 @@ import numpy as np
 import sys
 from os import listdir
 
-def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKernel=4 ):
+def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKernel=4, iterations=1):
   """
   Parameters:
     blur (int): size of the floating window used to smooth the image
@@ -23,44 +23,45 @@ def remove_shadow(image, blur=5, threshBlockSize=11, noisGapKernel=3, inpaintKer
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
   
   
-  # Convert to grayscale
-  gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-  # Apply blur to smooth the image
-  blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+  for i in range(int(iterations)):
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
   
-  # Use adaptive thresholding to create a binary image
-  thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
-  
-  # Morphological operations to remove noise
-  # kernel = np.ones((3, 3), np.uint8)
-  # opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
-  
-  # Find contours in the binary image
-  # contours, hierarchy = cv2.findContours(opening, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-  
-  # Draw the contours on the original image
-  # result = image.copy()
-  # cv2.drawContours(result, contours, -1, (0, 255, 0), 2)
-  
-  # Invert the binary image to highlight shadows
-  thresh = cv2.bitwise_not(thresh)
-  
-  # Apply morphological operations to remove noise and fill gaps in shadows
-  kernel = np.ones((3, 3), np.uint8)
-  thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-  
-  # Invert the binary image again to restore original intensity values
-  thresh = cv2.bitwise_not(thresh)
-  
-  # Apply the shadow mask to the original image
-  # result = cv2.bitwise_and(image, image, mask=thresh)
-  
-  result = cv2.inpaint(image, thresh.astype(np.uint8), 4, cv2.INPAINT_TELEA)
-  result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
-  
+    # Apply blur to smooth the image
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    
+    # Use adaptive thresholding to create a binary image
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    
+    # Morphological operations to remove noise
+    # kernel = np.ones((3, 3), np.uint8)
+    # opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
+    
+    # Find contours in the binary image
+    # contours, hierarchy = cv2.findContours(opening, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Draw the contours on the original image
+    # result = image.copy()
+    # cv2.drawContours(result, contours, -1, (0, 255, 0), 2)
+    
+    # Invert the binary image to highlight shadows
+    thresh = cv2.bitwise_not(thresh)
+    
+    # Apply morphological operations to remove noise and fill gaps in shadows
+    kernel = np.ones((3, 3), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    # Invert the binary image again to restore original intensity values
+    thresh = cv2.bitwise_not(thresh)
+    
+    # Apply the shadow mask to the original image
+    # result = cv2.bitwise_and(image, image, mask=thresh)
+    
+    image = cv2.inpaint(image, thresh.astype(np.uint8), 4, cv2.INPAINT_TELEA)
+    
   # cv2.imwrite(image_path[:len(image)-4]+"_shadowless.tif", result)
   
+  result = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
   return result
 
 

@@ -18,7 +18,7 @@ install.packages("lasR", repos = "https://r-lidar.r-universe.dev")
 ## install TreeLS from github
 remotes::install_github(repo = "tiagodc/TreeLS", upgrade = F)
 # install cloud2trees
-remotes::install_github(repo = "georgewoolsey/cloud2trees", upgrade = F)
+# remotes::install_github(repo = "georgewoolsey/cloud2trees", upgrade = F)
 library(reticulate)
 library(terra)
 library(lidR)
@@ -27,6 +27,7 @@ library(rlas)
 library(cloud2trees)
 library(sf)
 library(rgl)
+library(lidRviewer)
 
 ### Get external data for cloud2trees.
 # get_data(force=T)
@@ -45,6 +46,18 @@ library(rgl)
 source_python("ALS_viz_functions.py")
 
 
+# Working directory
+setwd("C:/Users/csfsuser/Colostate/Science & Data - GIS Team Server/PROJECTS/Drone/Frisco_GRFO/")
+
+# Data
+imgs = "NAIP/merged_naips.tif"
+
+# imgs = list.files("NAIP/",
+#                   pattern="*.jp2",
+#                   full.names = T)
+
+
+
 #---------------- Functions ----------------------------------------------------
 
 # Function to denoise and color point clouds
@@ -52,10 +65,12 @@ pc_clean = function(chunk, ortho) {
   las = readLAS(chunk)
   if(lidR::is.empty(las)) return(NULL)
 
-  las = filter_poi(las, Withheld_flag==F)
   las = classify_noise(las, ivf())
   las = filter_poi(las, Classification!=LASNOISE)
-  las = classify_ground(las, csf(sloop_smooth=T))
+
+  if(!any(las$Classification==2)) {
+    las = classify_ground(las, csf(sloop_smooth=T))
+  }
   las = merge_spatial(las, ortho)
 
   return(las)
@@ -167,19 +182,14 @@ landscape_viz = function(las, bg_col="skyblue", texture_file){
 ################################################################################
 
 #------------------------- enhance colors --------------------------------------
-# find orthomosaics
-imgs = list.files("../../../FCFO_CarterLake_lidar_visulazation/naip/",
-                  recursive=T,
-                  pattern="*20130716.tif",
-                  full.names = T)
-
 
 # run the Python color enhancement
 orthos = list()
 for(img in imgs) {
-  tmp_rast = rast(img) %>% terra::split(f=c(1,1,1,2))
-  values(tmp_rast[[1]]) = values(rast(enhance_pic(img, brightness=5, contrast=1.35)))
-  orthos[length(orthos)+1] = tmp_rast[[1]]
+  tmp_rast = rast(img)
+  tmp_rast = tmp_rast[[-4]]
+  values(tmp_rast) = values(rast(enhance_pic(img, brightness=5, contrast=1.35)))
+  orthos[length(orthos)+1] = tmp_rast
 }
 
 # # run the python shadow remover
@@ -222,35 +232,41 @@ for(f in lasFiles) writelax(f)
 ################################################################################
 
 # first find a good radius function for the locate-trees search window
-las = readLAS("../../../FCFO_CarterLake_lidar_visulazation/las/segmented/segmented_480000_4467000.las")
-lass = filter_poi(las, X>480500 & X<480600 & Y>4467500 & Y<4467600)
-lass = normalize_height(lass, knnidw())
-chm = rasterize_canopy(lass, 1, pitfree())
+readLASheader("LAS/USGS_LPC_CO_Central_and_WesternCO_2016_A16_LD28261617_colorized.las")
+las = readLAS("LAS/USGS_LPC_CO_Central_and_WesternCO_2016_A16_LD28261617_colorized.las", filter="-keep_xy 2828200 1618200 2828500 1618500")
+las = classify_ground(las, csf())
+las = normalize_height(las, knnidw())
+chm = rasterize_canopy(las, 1, pitfree())
 
 # after messing around with it, this is pretty good for the Carter Lake area.
 # There are a bunch of scrubby junipers around in the foothills that result
 # in too many trees with a linear function. This probably could be worked on
 # more, but a logarithmic function seemed like a good spot to start.
 
-ws = function(x) {
-y <- dplyr::case_when(is.na(x) ~ 0.001, x < 0 ~ 0.001, x < 2 ~
-1, x > 30 ~ 5, TRUE ~ 2*log(x/4)+2.5)
-return(y)
+ws = function (x)
+{
+  y <- dplyr::case_when(is.na(x) ~ 0.001, x < 0 ~ 0.001, x <=
+                          3 ~ 1.4, x > 26.5 ~ 5, TRUE ~ exp(-(3.5 * (1/x)) + (x^0.17)))
+  return(y)
 }
 
-ttops = locate_trees(lass, lmf(ws))
+ttops = locate_trees(las, lmf(ws))
 plot(chm)
-plot(sf::st_geometry(ttops), add = TRUE, pch = 3)
+zoom(chm)
+plot(sf::st_geometry(ttops), add = TRUE, pch = 20, col="red")
 
-
-output = cloud2trees(output_dir="../../../FCFO_CarterLake_lidar_visulazation/C2T_products/",
-                     input_las_dir="../../../FCFO_CarterLake_lidar_visulazation/las/colorized/",
+dir.create("cloud2trees_outputs/")
+output = cloud2trees(output_dir="cloud2trees_outputs/",
+                     input_las_dir="LAs/",
                      chm_res_m = 1,
                      estimate_tree_dbh=T,
+                     estimate_tree_type = T,
                      estimate_tree_cbh = T,
                      cbh_estimate_missing_cbh = T,
+                     estimate_tree_hmd = T,
+                     hmd_estimate_missing_hmd = T,
+                     estimate_biomass_method = "landfire",
                      estimate_tree_competition = T,
-                     estimate_tree_type = T,
                      ws = ws)
 
 

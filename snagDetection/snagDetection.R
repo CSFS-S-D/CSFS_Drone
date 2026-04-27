@@ -2,7 +2,7 @@
 # Purpose   To detect snags in aerial lidar point clouds
 # Person    Andy Whelan
 # Date      September 11, 2025
-# Modified  January 28, 2026
+# Modified  April 27, 2026
 ##################################################################################
 
 
@@ -18,8 +18,8 @@ library(terrainr)
 
 # Environment
 lasDir = "../../Frisco_GRFO/LAS/"
-bounds = "../../Frisco_GRFO/Shapefiles/FriscoBackyard_Units/FriscoBackyard_Units/FriscoBackyard_Units.shp"
-lasHeaderEx = readLASheader(dir(lasDir, full.names=T)[1])
+boundsPath = "../../Frisco_GRFO/Shapefiles/FriscoBackyard_Units/FriscoBackyard_Units/FriscoBackyard_Units.shp"
+lasHeaderEx = readLASheader(dir(lasDir, full.names=T)[2])
 
 
 ################################################################################
@@ -30,15 +30,15 @@ lasHeaderEx = readLASheader(dir(lasDir, full.names=T)[1])
 # of points that have been flagged as bad. The drone lidar data probably won't 
 # have any withheld, but the USGS lidar data can have a lot.
 ctg = catalog(lasDir, filter="-drop_withheld -keep_first")
-bounds = st_read(bounds)
+bounds = st_read(boundsPath)
 bounds = st_transform(bounds, st_crs(lasHeaderEx))
 
 # subset if necessary
-bounds = subset(bounds, Id==63)
+bounds = bounds[3,]
 
 # clip the catalog to the bounds. This also loads the actual point cloud.
 pc = clip_roi(ctg, bounds)
-pc$Z = pc$Z*0.3048
+pc$Z = pc$Z*0.3048 # convert feet to meters. XY are already in meters.
 
 ################################################################################
 ########                      Data Wranglin                             ########
@@ -180,6 +180,9 @@ view(over_snags)
 # snags taller than 10m
 over_ttops10 = over_ttops[over_ttops$Z > 10,]
 over_snags10 = over_snags[over_snags$treeID %in% over_ttops10$treeID,]
+nrow(over_snags10)
+view(over_snags10)
+
 
 snags_10_3 = aggregate(Z~treeID, over_snags10@data, min)
 snags_10_3 = snags_10_3[snags_10_3$Z < 3,]
@@ -193,6 +196,8 @@ nrow(snags_10_3)
 # Snags taller than 5m
 over_ttops5 = over_ttops[over_ttops$Z > 5,]
 over_snags5 = over_snags[over_snags$treeID %in% over_ttops5$treeID,]
+nrow(over_snags5)
+view(over_snags5)
 
 snags_5_3 = aggregate(Z~treeID, over_snags5@data, min)
 snags_5_3 = snags_5_3[snags_5_3$Z < 3,]
@@ -207,6 +212,8 @@ over_ttops$dbh = over_ttops$Z*0.3707240+1.1857200
 # over_ttops = st_intersection(over_ttops, bounds);
 over_ttops_dbh5 = over_ttops[over_ttops$dbh >= 5,]
 over_snags_dbh5 = over_snags[over_snags$treeID %in% over_ttops_dbh5$treeID,]
+nrow(over_snags_dbh5)
+view(over_snags_dbh5)
 
 snags_dbh5_3 = aggregate(Z~treeID, over_snags_dbh5@data, min)
 snags_dbh5_3 = snags_dbh5_3[snags_dbh5_3$Z < 3,]

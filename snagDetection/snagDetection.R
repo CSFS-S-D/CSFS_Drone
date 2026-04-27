@@ -17,9 +17,9 @@ library(sf)
 library(terrainr)
 
 # Environment
-lasDir = "../../Frisco_GRFO/LAS/"
-boundsPath = "../../Frisco_GRFO/Shapefiles/FriscoBackyard_Units/FriscoBackyard_Units/FriscoBackyard_Units.shp"
-lasHeaderEx = readLASheader(dir(lasDir, full.names=T)[2])
+lasDir = "../../Bofo/Pinecliffe_BUFO/Arc/Terra_outputs/las/"
+boundsPath = "../../Bofo/Pinecliffe_BUFO/Arc/Planning/PincliffeBoundaryLayoutFINAL/PincliffeBoundaryLayoutFINAL.shp"
+lasHeaderEx = readLASheader(dir(lasDir, full.names=T)[1])
 
 
 ################################################################################
@@ -34,11 +34,11 @@ bounds = st_read(boundsPath)
 bounds = st_transform(bounds, st_crs(lasHeaderEx))
 
 # subset if necessary
-bounds = bounds[3,]
+bounds = bounds[1,]
 
 # clip the catalog to the bounds. This also loads the actual point cloud.
-pc = clip_roi(ctg, bounds)
-pc$Z = pc$Z*0.3048 # convert feet to meters. XY are already in meters.
+pc = clip_roi(ctg, st_bbox(bounds))
+# pc$Z = pc$Z*0.3048 # convert feet to meters. XY are already in meters.
 
 ################################################################################
 ########                      Data Wranglin                             ########
@@ -54,10 +54,14 @@ pc$Z = pc$Z*0.3048 # convert feet to meters. XY are already in meters.
 # developed using lower density point clouds, I think.
 
 plot(rasterize_density(pc)) 
-pc = decimate_points(pc, homogenize(density = 1, res=5))
+pc = decimate_points(pc, homogenize(density = 20, res=5))
 
 # Normalize height for snag detection
+pc = classify_ground(pc, csf())
 pc = normalize_height(pc, knnidw())
+
+# Estimate intensity from RGB for SFM point clouds
+pc$Intensity = as.integer(pc$R*0.2126+pc$G*0.7152+pc$B*0.0722)
 
 # Intensity values need to be 8-bit. They are often 16-bit. So, we
 # need to convert.
@@ -71,8 +75,8 @@ hist(pc$Intensity)# breaks=200, xlim=c(0,25))
 # Calculate bole and branch to foliage intensity ratio. Use the two values just 
 # after the peaks from the histogram.
 over_pc = filter_poi(pc, Z>=2)
-bbvf = (length(over_pc$Intensity[over_pc$Intensity<=3 | over_pc$Intensity>=13]))/
-  (length(over_pc$Intensity[over_pc$Intensity>3 | over_pc$Intensity<13]))
+bbvf = (length(over_pc$Intensity[over_pc$Intensity<=30 | over_pc$Intensity>=140]))/
+  (length(over_pc$Intensity[over_pc$Intensity>30 | over_pc$Intensity<140]))
 
 # Calculate these (lower and upper intensity thresholds)
 Lint = 20*bbvf+0.075*(max(pc$Intensity)) + 26.5
@@ -180,7 +184,7 @@ view(over_snags)
 # snags taller than 10m
 over_ttops10 = over_ttops[over_ttops$Z > 10,]
 over_snags10 = over_snags[over_snags$treeID %in% over_ttops10$treeID,]
-nrow(over_snags10)
+length(unique(over_snags10$treeID))
 view(over_snags10)
 
 
@@ -196,7 +200,7 @@ nrow(snags_10_3)
 # Snags taller than 5m
 over_ttops5 = over_ttops[over_ttops$Z > 5,]
 over_snags5 = over_snags[over_snags$treeID %in% over_ttops5$treeID,]
-nrow(over_snags5)
+length(unique(over_snags5$treeID))
 view(over_snags5)
 
 snags_5_3 = aggregate(Z~treeID, over_snags5@data, min)
@@ -212,7 +216,7 @@ over_ttops$dbh = over_ttops$Z*0.3707240+1.1857200
 # over_ttops = st_intersection(over_ttops, bounds);
 over_ttops_dbh5 = over_ttops[over_ttops$dbh >= 5,]
 over_snags_dbh5 = over_snags[over_snags$treeID %in% over_ttops_dbh5$treeID,]
-nrow(over_snags_dbh5)
+length(unique(over_snags_dbh5$treeID))
 view(over_snags_dbh5)
 
 snags_dbh5_3 = aggregate(Z~treeID, over_snags_dbh5@data, min)

@@ -15,10 +15,11 @@ library(lidRviewer)
 library(terra)
 library(sf)
 library(terrainr)
+library(multimode)
 
 # Environment
-lasDir = "../../Bofo/Pinecliffe_BUFO/Arc/Terra_outputs/las/"
-boundsPath = "../../Bofo/Pinecliffe_BUFO/Arc/Planning/PincliffeBoundaryLayoutFINAL/PincliffeBoundaryLayoutFINAL.shp"
+lasDir = "../../Frisco_GRFO/LAS/"
+boundsPath = "../../Frisco_GRFO/Shapefiles/FriscoBackyard_Units/FriscoBackyard_Units/FriscoBackyard_Units.shp"
 lasHeaderEx = readLASheader(dir(lasDir, full.names=T)[1])
 
 
@@ -34,7 +35,7 @@ bounds = st_read(boundsPath)
 bounds = st_transform(bounds, st_crs(lasHeaderEx))
 
 # subset if necessary
-bounds = bounds[1,]
+bounds = bounds[2,]
 
 # clip the catalog to the bounds. This also loads the actual point cloud.
 pc = clip_roi(ctg, st_bbox(bounds))
@@ -54,14 +55,14 @@ pc = clip_roi(ctg, st_bbox(bounds))
 # developed using lower density point clouds, I think.
 
 plot(rasterize_density(pc)) 
-pc = decimate_points(pc, homogenize(density = 20, res=5))
+pc = decimate_points(pc, homogenize(density = 1, res=5))
 
 # Normalize height for snag detection
-pc = classify_ground(pc, csf())
+# pc = classify_ground(pc, csf())
 pc = normalize_height(pc, knnidw())
 
 # Estimate intensity from RGB for SFM point clouds
-pc$Intensity = as.integer(pc$R*0.2126+pc$G*0.7152+pc$B*0.0722)
+# pc$Intensity = as.integer(pc$R*0.2126+pc$G*0.7152+pc$B*0.0722)
 
 # Intensity values need to be 8-bit. They are often 16-bit. So, we
 # need to convert.
@@ -72,11 +73,16 @@ pc$Intensity = as.integer(pc$Intensity/(2^16-1)*(2^8-1))
 # choose thresholds just higher than each. Adjust the histogram as necessary.
 hist(pc$Intensity)# breaks=200, xlim=c(0,25))
 
+# Automatically find modes. Sometimes there's crap, uLim tries to get rid of it.
+uLim = pc$Intensity[order(pc$Intensity)][round(0.99*length(pc$Intensity))]
+modes = locmodes(pc$Intensity, mod0=2, lowsup=0, uppsup=uLim) 
+
+
 # Calculate bole and branch to foliage intensity ratio. Use the two values just 
 # after the peaks from the histogram.
 over_pc = filter_poi(pc, Z>=2)
-bbvf = (length(over_pc$Intensity[over_pc$Intensity<=30 | over_pc$Intensity>=140]))/
-  (length(over_pc$Intensity[over_pc$Intensity>30 | over_pc$Intensity<140]))
+bbvf = (length(over_pc$Intensity[over_pc$Intensity<=modes$locations[1] | over_pc$Intensity>=modes$locations[3]]))/
+  (length(over_pc$Intensity[over_pc$Intensity>modes$locations[1] | over_pc$Intensity<modes$locations[3]]))
 
 # Calculate these (lower and upper intensity thresholds)
 Lint = 20*bbvf+0.075*(max(pc$Intensity)) + 26.5

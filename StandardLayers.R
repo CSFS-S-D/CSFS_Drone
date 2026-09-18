@@ -2,7 +2,7 @@
 # Purpose     Create map layers and graphs from drone data
 # Person      Andy Whelan 
 # Date        October 31, 2024
-# Modified    July 15, 2025
+# Modified    July 15, 2026
 ################################################################################
 
 
@@ -34,8 +34,8 @@ bounds = st_read("../Shapefiles/FriscoBackyard_Units/FriscoBackyard_Units/Frisco
 plot(bounds['Phase_1'])
 bounds = subset(bounds, Phase_1==1)
 
-# path to orthomosaic (if needed, otherwise NULL).
-ortho = NULL
+# path to orthomosaic(s) (if needed, otherwise NULL).
+ortho = dir("../TerraOutput/", pattern=".tif", recursive=T, full.names=T)
 
 # DTM and CHM constants for cloud to trees.
 dtm_res = 1
@@ -119,15 +119,24 @@ bounds_dis = bounds %>% st_union() %>% st_sf()
 bounds_buf = bounds_dis %>% st_buffer(dist= 20)
 
 # orthomosaic
-if(!is.null(ortho)){
+if(length(ortho)!=0){
+  ortho = lapply(ortho, function(x) rast(x))
+  ortho = mosaic(sprc(ortho), resample=T)
   ortho = crop(ortho, bounds_buf, mask=T)
-  writeRaster(ortho, "Products/Raster/ortho_cropped.tif")
-}
+  writeRaster(ortho, "Products/Raster/ortho.tif")
+}else if(length(ortho>1))
 
 # tree_tops
 ttops_c = st_intersection(ttops, bounds_buf)
 ttops_c$treeID_ref = ttops_c$treeID
 ttops_c$treeID = 1:nrow(ttops_c)
+
+  # add standing tree biomass
+  # get allometry for dominant species from Chojnacky et al. 2014
+  biomassKg = exp(-2.6177 + 2.4638 * log(ttops_c$dbh_cm))
+  
+  # add to ttops_c
+  ttops_c$tree_biomass_kg = biomassKg
 
 # crowns 
 crowns = st_intersection(crowns, bounds_buf)
@@ -139,7 +148,6 @@ clumps$area = as.numeric(st_area(clumps))
 # slope and aspect 
 slope = terrain(dtm, "slope")
 aspect = terrain(dtm, "aspect")
-
 
 
 # --- Calculate crown Density ----
@@ -226,6 +234,13 @@ varnames(rasters$dsm)
 # Make sure everything has names.
 names(rasters)[6] = "verticalDensity"
 
+# Make a tree biomass tons per acre raster. 10-meter grid won't stack with others
+dtm = crop(dtm, vect(bounds_buf), mask=T)
+tmp_grid = aggregate(dtm, fact=10, fun="mean")
+biomass = rasterize(ttops_c, tmp_grid, field="tree_biomass_kg", fun="sum")
+
+# convert biomass from kg/100m^2 to tons/acre
+biomass = biomass*0.0446
 
 
 ################################################################################
@@ -278,6 +293,10 @@ uniformThinClumps$area = as.numeric(sf::st_area(uniformThinClumps))
 for(i in 1:length(names(rasters))) {
   writeRaster(rasters[[i]], paste0("Products/Raster/",names(rasters)[i],".tif"), overwrite=T)
 }
+
+  # Save the tree biomass raster
+  writeRaster(biomass, "Products/Raster/StandingTreeBiomass.tif")
+
 
 # Vector
 st_write(ttops_c, "Products/Vector/ttops_c.gpkg", append=F)
